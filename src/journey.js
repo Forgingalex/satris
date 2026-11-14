@@ -3,6 +3,7 @@ import {
   SOURCES,
   validateCheck,
   feelingIsCurrent,
+  personIdentity,
 } from "./sleep.js";
 
 export const RESPONSES = {
@@ -23,7 +24,8 @@ export function previousRecord(check, records) {
   return prior &&
     (prior.check.mode || "personal") === (check.mode || "personal") &&
     (prior.check.scenarioId || null) === (check.scenarioId || null) &&
-    (prior.check.personId || null) === (check.personId || null)
+    personIdentity(check) !== null &&
+    personIdentity(prior.check) === personIdentity(check)
     ? prior
     : null;
 }
@@ -48,9 +50,14 @@ export function beginReturn(
     throw Error(
       "This check already has a return assessment. Open that assessment to continue.",
     );
+  if (personIdentity(prior.check) === null)
+    throw Error(
+      "The person identifiers conflict. Correct them before starting a return check.",
+    );
   const check = createCheck(prior.check.mode || "personal");
-  for (const key of ["scenarioId", "personId"])
+  for (const key of ["scenarioId"])
     if (prior.check[key]) check[key] = prior.check[key];
+  check.personId = personIdentity(prior.check);
   check.observedAt = now;
   check.enteredAt = now;
   check.returnContext = {
