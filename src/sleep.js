@@ -1,7 +1,7 @@
 // Satris routine sleep assessment. Deterministic educational decision support.
 // Clinical principles, arithmetic, and mission adaptations remain distinguishable.
-export const VERSION = "0.4.0";
-export const CONTENT_VERSION = "2026-11-14-routine-2";
+export const VERSION = "0.5.0";
+export const CONTENT_VERSION = "2026-11-14-routine-4";
 export const SOURCES = {
   hrp: {
     id: "hrp",
@@ -130,6 +130,9 @@ const num = (x) => typeof x === "number" && Number.isFinite(x);
 const uid = () => globalThis.crypto.randomUUID();
 const iso = () => new Date().toISOString();
 const amount = (x) => Number(x.toFixed(2));
+// Legacy records did not distinguish the sleep period from the condition report.
+export const feelingIsCurrent = (c) =>
+  c.feelingScope === "current" || (!c.feelingScope && c.isCurrent !== false);
 export function createProfile() {
   return {
     environment: "unspecified",
@@ -184,10 +187,13 @@ export function createCheck(mode = "personal") {
     opportunityHours: null,
     quality: "estimated",
     feeling: "unknown",
+    feelingScope: null,
+    feelingObservedAt: null,
     disruptions: [],
     disruptionStatus: "unknown",
     recurring: "unknown",
     urgent: "no",
+    urgentReportedAt: null,
     notes: "",
     selectedActionId: null,
     actionStatus: "planned",
@@ -286,7 +292,7 @@ export const EXAMPLES = [
     ),
   },
 }));
-export function validateCheck(c) {
+export function validateCheck(c, nowMs = Date.now()) {
   const errors = [];
   for (const [key, label] of [
     ["sleepHours", "Estimated sleep"],
@@ -337,6 +343,31 @@ export function validateCheck(c) {
     );
   if (!c.observedAt || !Number.isFinite(new Date(c.observedAt).getTime()))
     errors.push("Record a valid observation date and time.");
+  for (const [key, label] of [
+    ["observedAt", "Sleep observation"],
+    ["feelingObservedAt", "Condition report"],
+    ["urgentReportedAt", "Urgent report"],
+  ]) {
+    if (c[key] && !Number.isFinite(Date.parse(c[key])))
+      errors.push(`${label} time must be valid.`);
+    else if (c[key] && Date.parse(c[key]) > nowMs)
+      errors.push(
+        `${label} time cannot be in the future. Record observations already made; use reminders for planned checks.`,
+      );
+  }
+  if (
+    c.feelingScope != null &&
+    !["current", "historical"].includes(c.feelingScope)
+  )
+    errors.push(
+      "Confirm whether the condition report is current or historical.",
+    );
+  if (
+    c.feelingScope === "current" &&
+    c.feeling !== "unknown" &&
+    !c.feelingObservedAt
+  )
+    errors.push("Record a condition report time for the current experience.");
   return errors;
 }
 export function validateProfile(p) {
@@ -395,7 +426,7 @@ function contactInstructions(p) {
     "Keep this record available for that review. No communication connection has been verified by Satris.",
   ];
 }
-export function assess(c, p = createProfile()) {
+export function assess(c, p = createProfile(), nowMs = Date.now()) {
   const r = {
     priority: "routine",
     headline: "Keep a useful sleep record",
@@ -493,7 +524,10 @@ export function assess(c, p = createProfile()) {
     );
     return finish();
   }
-  if (c.isCurrent === false) {
+  const errors = validateCheck(c, nowMs),
+    planErrors = validateProfile(p);
+  r.uncertainties.push(...errors, ...planErrors);
+  if (c.isCurrent === false && !feelingIsCurrent(c)) {
     r.priority = "clarify";
     r.headline = "Keep this as a historical record";
     r.summary =
@@ -519,12 +553,8 @@ export function assess(c, p = createProfile()) {
     );
     return finish();
   }
-  const errors = validateCheck(c),
-    planErrors = validateProfile(p);
-  if (errors.length || planErrors.length) {
-    r.uncertainties.push(...errors, ...planErrors);
-  }
-  const review = ["impact", "unintended"].includes(c.feeling);
+  const review =
+    feelingIsCurrent(c) && ["impact", "unintended"].includes(c.feeling);
   if (review) {
     r.priority = "review";
     r.headline = "Arrange a medical review";
@@ -561,6 +591,31 @@ export function assess(c, p = createProfile()) {
       [
         "Review the specific issues shown above.",
         "Correct the entry or explicitly mark it unknown.",
+      ],
+      ["data", "design"],
+    );
+    return finish();
+  }
+  if (c.isCurrent === false || !feelingIsCurrent(c)) {
+    addFinding(
+      "historical-sleep",
+      "Sleep and condition reports have different times",
+      "The sleep observations describe an earlier period. Any current condition report is considered separately; older sleep values do not establish your latest sleep or its cause.",
+      ["data", "design"],
+    );
+    if (!review) {
+      r.priority = "clarify";
+      r.headline = "Add a current sleep check when available";
+      r.summary =
+        "The earlier sleep record is retained separately from your condition report. This does not establish a current health assessment.";
+    }
+    action(
+      "current-check",
+      "Begin a current check",
+      "Earlier sleep observations cannot establish your latest sleep period.",
+      [
+        "Keep the earlier record with its observation time.",
+        "Record your latest main sleep when available. Current concerning sleepiness still needs medical review.",
       ],
       ["data", "design"],
     );
@@ -787,7 +842,12 @@ export function buildExport(c, p) {
   const observations = [
     ["sleep_duration", c.sleepHours, "h", "sleepHours"],
     ["sleep_opportunity", c.opportunityHours, "h", "opportunityHours"],
-    ["current_sleepiness", c.feeling, null, "feeling"],
+    [
+      feelingIsCurrent(c) ? "current_sleepiness" : "recorded_sleepiness",
+      c.feeling,
+      null,
+      "feeling",
+    ],
   ].map(([indicator, value, unit, key]) => ({
     indicator,
     value: value ?? null,
@@ -800,7 +860,11 @@ export function buildExport(c, p) {
           : c.quality === "uncertain" && key !== "feeling"
             ? "uncertain"
             : "reported",
-    observedAt: c.observedAt,
+    observedAt:
+      key === "feeling"
+        ? c.feelingObservedAt ||
+          (c.feelingScope === "current" ? null : c.observedAt)
+        : c.observedAt,
     enteredAt: c.enteredAt,
     method:
       key === "feeling"
@@ -811,6 +875,26 @@ export function buildExport(c, p) {
       c.inputOrigins?.[key] ||
       (c.mode === "example" ? "example" : "user-entry"),
   }));
+  for (const item of observations) {
+    if (
+      item.observedAt &&
+      (!Number.isFinite(Date.parse(item.observedAt)) ||
+        Date.parse(item.observedAt) > Date.now())
+    )
+      item.status = "invalid";
+  }
+  if (["yes", "unsure"].includes(c.urgent))
+    observations.push({
+      indicator: "urgent_concern",
+      value: c.urgent,
+      unit: null,
+      status: "reported",
+      observedAt: c.urgentReportedAt || null,
+      enteredAt: c.urgentReportedAt || null,
+      method: "Current concern reported through the urgent-help control",
+      inputRoute: "selection",
+      origin: c.inputOrigins?.urgent || "user-entry",
+    });
   if (c.caffeineMg != null)
     observations.push({
       indicator: "latest_reported_caffeine",

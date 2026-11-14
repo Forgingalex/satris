@@ -111,6 +111,7 @@ export function advanceRoutine(schedule, check, nowMs = Date.now()) {
     check?.isCurrent === false ||
     check?.urgent !== "no" ||
     !Number.isFinite(observed) ||
+    observed > nowMs ||
     observed < due
   )
     return next;

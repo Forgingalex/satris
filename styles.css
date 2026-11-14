@@ -2318,6 +2318,60 @@ dialog::backdrop {
 }
 
 /* Original adult crew portrait and companion, sharing an orbital view. */
+.active-plan,
+.return-review {
+  background: linear-gradient(125deg, #0e2142, #172d45);
+  border: 1px solid #657b90;
+  border-radius: 20px;
+  padding: 28px;
+  margin: 24px 0;
+}
+.active-plan {
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  justify-content: space-between;
+}
+.active-plan > div:first-child {
+  max-width: 650px;
+}
+.active-plan .button-column {
+  min-width: 200px;
+}
+.return-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 20px;
+}
+.return-grid > div {
+  border-left: 2px solid #aebfce;
+  padding-left: 18px;
+}
+.return-review > .small {
+  margin-top: 20px;
+}
+.review-note {
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+@media (max-width: 650px) {
+  .active-plan {
+    display: block;
+    padding: 22px;
+  }
+  .active-plan .button-column {
+    margin-top: 18px;
+  }
+  .return-grid {
+    grid-template-columns: 1fr;
+  }
+  .return-review {
+    padding: 22px;
+  }
+}
 .welcome-card:has(.crew-portrait) {
   grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
   gap: 20px;
