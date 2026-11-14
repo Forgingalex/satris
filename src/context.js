@@ -1,5 +1,5 @@
 // Descriptive context only. This module does not classify health or task readiness.
-import { feelingIsCurrent } from "./sleep.js";
+import { feelingIsCurrent, personIdentity } from "./sleep.js";
 const knownNumber = (v) => typeof v === "number" && Number.isFinite(v);
 const norm = (v) =>
   String(v || "")
@@ -70,6 +70,8 @@ export function validateContext(c, nowMs = Date.now()) {
 }
 function cohort(c, records, nowMs) {
   const currentTime = time(c.observedAt);
+  const person = personIdentity(c);
+  if (person === null) return [];
   if (!Number.isFinite(currentTime) || currentTime > nowMs) return [];
   const candidates = records
     .map((r) => ({ c: r.check || r, savedAt: r.savedAt || r.enteredAt || "" }))
@@ -84,8 +86,7 @@ function cohort(c, records, nowMs) {
         norm(p.mode || "personal") !== norm(c.mode || "personal")
       )
         return false;
-      if (norm(p.subjectId || "self") !== norm(c.subjectId || "self"))
-        return false;
+      if (personIdentity(p) !== person) return false;
       if (
         c.mode === "example" &&
         (!c.scenarioId || p.scenarioId !== c.scenarioId)
@@ -278,7 +279,7 @@ export function contextSummary(c, records = [], nowMs = Date.now()) {
   return {
     heading: c.upcomingTask
       ? `Context to review before ${c.upcomingTask}`
-      : "Your combined review",
+      : "Your sleep review",
     summary,
     items,
     comparison: {

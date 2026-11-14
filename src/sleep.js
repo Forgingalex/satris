@@ -1,7 +1,7 @@
 // Satris routine sleep assessment. Deterministic educational decision support.
 // Clinical principles, arithmetic, and mission adaptations remain distinguishable.
-export const VERSION = "0.5.0";
-export const CONTENT_VERSION = "2026-11-14-routine-4";
+export const VERSION = "0.5.1";
+export const CONTENT_VERSION = "2026-11-14-routine-5";
 export const SOURCES = {
   hrp: {
     id: "hrp",
@@ -133,6 +133,15 @@ const amount = (x) => Number(x.toFixed(2));
 // Legacy records did not distinguish the sleep period from the condition report.
 export const feelingIsCurrent = (c) =>
   c.feelingScope === "current" || (!c.feelingScope && c.isCurrent !== false);
+// Read older subjectId records without mixing different or conflicting people.
+export function personIdentity(check = {}) {
+  const ids = [check.personId, check.subjectId].filter(
+    (v) => v != null && v !== "",
+  );
+  if (ids.some((v) => typeof v !== "string" || !v.trim())) return null;
+  const unique = [...new Set(ids.map((v) => v.trim()))];
+  return unique.length > 1 ? null : unique[0] || "self";
+}
 export function createProfile() {
   return {
     environment: "unspecified",
