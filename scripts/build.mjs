@@ -16,6 +16,7 @@ for (const file of [
   "alerts.js",
   "workspace.js",
   "routine.js",
+  "journey.js",
 ])
   await copyFile(join(root, "src", file), join(out, "src", file));
 for (const file of ["satris-wordmark.svg", "satris-emblem.svg"])

@@ -10,8 +10,20 @@ import {
   environmentInsight,
 } from "./sleep.js";
 import { loadWorkspace, saveWorkspace } from "./workspace.js";
-import { deriveAlerts, calendarEvent } from "./alerts.js";
+import {
+  deriveAlerts,
+  calendarEvent,
+  primaryPlan,
+  reportedWorsening,
+  worseningContactRecorded,
+} from "./alerts.js";
 import { contextSummary, validateContext } from "./context.js";
+import {
+  beginReturn,
+  linkReturn,
+  returnSummary,
+  reviewNote,
+} from "./journey.js";
 import {
   defaultSchedule,
   validateSchedule,
@@ -49,6 +61,10 @@ const clone = (v) => structuredClone(v),
       : "Not recorded";
 const hrs = (v) =>
   v == null ? "Not sure" : Number(v).toFixed(1).replace(/\.0$/, "") + " h";
+const recordTime = (r) =>
+  r.assessment.priority === "urgent"
+    ? r.check.urgentReportedAt
+    : r.check.observedAt;
 const inp = (v) => {
   if (!v) return "";
   let d = new Date(v);
@@ -539,7 +555,17 @@ function rhythmCalendar() {
   );
 }
 function historyExplorer() {
-  let records = ws().checks.slice(-7),
+  let records = ws()
+      .checks.filter((r) => {
+        const observed = Date.parse(r.check.observedAt),
+          saved = Date.parse(r.savedAt);
+        return (
+          Number.isFinite(observed) &&
+          observed <= Date.now() &&
+          (!Number.isFinite(saved) || observed <= saved)
+        );
+      })
+      .slice(-7),
     scenario = demo() ? records.at(-1)?.check?.scenarioId : null;
   if (demo())
     records = records.filter(
@@ -590,7 +616,7 @@ function crewScene() {
 }
 
 function todayView() {
-  const last = ws().checks.at(-1),
+  const last = primaryPlan(ws().checks),
     due = ws().checks.find(
       (r) =>
         r.check.followUpAt &&
@@ -600,20 +626,41 @@ function todayView() {
   return (
     title(
       "Your next health step",
-      "A small check. A clearer next step.",
-      "Look back at your sleep, understand the context, and choose what to address next.",
+      last
+        ? "Welcome back. Pick up your plan."
+        : "A small check. A clearer next step.",
+      last
+        ? "Your last review, next step and fresh check stay connected."
+        : "Look back at your sleep, understand the context, and choose what to address next.",
     ) +
-    '<section class="welcome-card"><div><span class="section-kicker">Your sleep brief</span><h2>How was your last sleep?</h2><p>Record what you know. See what it means in context. Decide what to address before your next sleep period.</p><div class="button-row">' +
-    btn(
-      ws().draft ? "Continue my check" : "Start sleep check",
-      ws().draft ? "continue" : "start",
-      "primary",
-      'data-testid="start-check"',
-    ) +
-    btn("Try an example", "examples", "secondary") +
-    '</div><p class="quiet small">No wearable needed. Not sure is useful information too.</p></div><div class="sleep-art orbital-window crew-portrait" aria-hidden="true">' +
-    crewScene() +
-    "<p>One small step, at your pace.</p></div></section>" +
+    (ws().draft &&
+    (reportedWorsening(ws().draft) ||
+      ["yes", "unsure"].includes(ws().draft.urgent))
+      ? '<section class="notice warning"><strong>Your unfinished check includes a concern.</strong><p>Get crew help for an urgent concern or report worsening to medical support. Do not wait to finish the check.</p>' +
+        btn("Open reported concern", "draft-concern", "secondary") +
+        "</section>"
+      : "") +
+    (last
+      ? nextStepCard(last) +
+        '<div class="button-row return-tools">' +
+        btn(
+          ws().draft ? "Continue my check" : "Start a separate check",
+          ws().draft ? "continue" : "start",
+          "secondary",
+        ) +
+        btn("Try an example", "examples", "text") +
+        "</div>"
+      : '<section class="welcome-card"><div><span class="section-kicker">Your sleep brief</span><h2>How was your last sleep?</h2><p>Record what you know. See what it means in context. Decide what to address before your next sleep period.</p><div class="button-row">' +
+        btn(
+          ws().draft ? "Continue my check" : "Start sleep check",
+          ws().draft ? "continue" : "start",
+          "primary",
+          'data-testid="start-check"',
+        ) +
+        btn("Try an example", "examples", "secondary") +
+        '</div><p class="quiet small">No wearable needed. Not sure is useful information too.</p></div><div class="sleep-art orbital-window crew-portrait" aria-hidden="true">' +
+        crewScene() +
+        "<p>One small step, at your pace.</p></div></section>") +
     rhythmCard() +
     (due
       ? '<section class="notice follow-notice"><div><p class="eyebrow">Your reminder</p><h2>A follow-up is due</h2><p>What happened after your planned step?</p></div>' +
@@ -627,24 +674,11 @@ function todayView() {
       : "") +
     '<div class="journey-strip"><div><span>01</span><p><strong>Your observations</strong><br>Sleep, sleepiness and disruptions.</p></div><div><span>02</span><p><strong>A clear explanation</strong><br>What is supported and what is uncertain.</p></div><div><span>03</span><p><strong>One next step</strong><br>Available actions and a follow-up.</p></div></div>' +
     journeyCard() +
-    (last
-      ? '<section class="recent-card"><div><p class="eyebrow">Your latest check</p><h2>' +
-        esc(last.assessment.headline) +
-        '</h2><p class="quiet">' +
-        esc(time(last.check.observedAt)) +
-        " · " +
-        hrs(last.check.sleepHours) +
-        " reported sleep</p></div>" +
-        btn(
-          "Open check",
-          "record",
-          "secondary",
-          'data-id="' + esc(last.id) + '"',
-        ) +
-        "</section>"
-      : '<p class="start-note">New here? ' +
+    (!last
+      ? '<p class="start-note">New here? ' +
         btn("Take the quick tour", "tour", "text") +
-        " You can also begin straight away.</p>") +
+        " You can also begin straight away.</p>"
+      : "") +
     habitatCard() +
     '<div class="context-line"><span>' +
     esc(env(ws().profile.environment)) +
@@ -655,12 +689,73 @@ function todayView() {
     '</span><button class="text-link" data-action="profile">Plan & resources</button></div>'
   );
 }
+function nextStepCard(record) {
+  if (!record) return "";
+  const action = record.assessment.actions.find(
+    (a) => a.id === record.check.selectedActionId,
+  );
+  const concern = deriveAlerts([record]).find(
+    (a) => a.kind === "urgent" || a.kind === "review",
+  );
+  return (
+    '<section class="active-plan"><div><p class="eyebrow">Your next step</p><h2>' +
+    esc(concern?.title || action?.title || record.assessment.headline) +
+    "</h2><p>" +
+    esc(concern?.message || action?.why || record.assessment.summary) +
+    '</p><p class="small quiet">' +
+    (record.check.actionStatus === "done"
+      ? "You marked this step completed. A fresh check can record how you are now."
+      : "Your step is planned. Tell us what you could do, then check how you are now.") +
+    '</p></div><div class="button-column">' +
+    btn(
+      concern ? "Open concern" : "Return to my plan",
+      concern ? "record" : "return-check",
+      "primary",
+      'data-id="' + esc(record.id) + '"',
+    ) +
+    btn(
+      "View saved review",
+      "record",
+      "text",
+      'data-id="' + esc(record.id) + '"',
+    ) +
+    "</div></section>"
+  );
+}
+function returnCard(c, a) {
+  const s = returnSummary(c, a, ws().checks);
+  if (!s) return "";
+  return (
+    '<section class="return-review"><p class="eyebrow">Your plan, carried forward</p><h2>' +
+    (s.changed
+      ? "Your next step has changed"
+      : "Your next step still applies") +
+    '</h2><div class="return-grid"><div><span class="small quiet">Previous step</span><h3>' +
+    esc(s.oldAction) +
+    "</h3><p>" +
+    esc(s.response + ". " + s.change + ".") +
+    "</p><p>" +
+    esc(c.returnContext.note || "No additional observation recorded.") +
+    '</p></div><div><span class="small quiet">From this new check</span><h3>' +
+    esc(s.nextAction) +
+    "</h3><p>" +
+    esc(a.summary) +
+    '</p></div></div><p class="small quiet">New observations determine this review. A later change does not prove the previous action caused it. A new check does not confirm that medical support was contacted or clear an earlier concern.</p>' +
+    btn(
+      "Open previous check",
+      "record",
+      "text",
+      'data-id="' + esc(s.prior.id) + '"',
+    ) +
+    "</section>"
+  );
+}
 function checkView() {
   let c = ws().draft,
     s = state.step || 0;
   return (
     title(
-      "Sleep check",
+      c.returnContext ? "Return check · Fresh observations" : "Sleep check",
       [
         "Your last sleep period",
         "How do you feel now?",
@@ -969,7 +1064,9 @@ function sleepForm(c) {
     sel(c.isCurrent === false ? "no" : "yes", "yes") +
     '>Latest main sleep period</option><option value="no"' +
     sel(c.isCurrent === false ? "no" : "yes", "no") +
-    '>Earlier sleep period</option></select><label class="field-label" for="observedAt">When did you make these observations?</label><input id="observedAt" name="observedAt" type="datetime-local" value="' +
+    '>Earlier sleep period</option></select><label class="field-label" for="observedAt">When did you make these observations?</label><input id="observedAt" name="observedAt" type="datetime-local" max="' +
+    inp(new Date().toISOString()) +
+    '" value="' +
     esc(inp(c.observedAt)) +
     '"><p class="quiet small">' +
     esc(Intl.DateTimeFormat().resolvedOptions().timeZone) +
@@ -980,7 +1077,11 @@ function sleepForm(c) {
 }
 function feelingForm(c) {
   return (
-    '<form id="feeling-form"><p class="intro">Your current experience matters even when a number looks reassuring. Choose the description that fits best.</p><fieldset class="choice-list"><legend class="sr-only">Current sleepiness</legend>' +
+    '<form id="feeling-form"><p class="intro">Your current experience matters even when a number looks reassuring. Choose the description that fits best.</p>' +
+    (c.isCurrent === false
+      ? '<p class="notice">Your sleep record is from an earlier period. This question is about how you feel now and is recorded with its own time.</p>'
+      : "") +
+    '<fieldset class="choice-list"><legend class="sr-only">Current sleepiness</legend>' +
     [
       ["alert", "As usual", "Awake and functioning as I usually do."],
       [
@@ -1164,8 +1265,15 @@ function resultView() {
       routine: "Routine review",
     }[a.priority] +
     "</span><span>" +
-    esc(time(c.observedAt)) +
-    "</span></div>" +
+    esc(
+      (a.priority === "urgent" ? "Concern reported " : "Sleep observed ") +
+        time(a.priority === "urgent" ? c.urgentReportedAt : c.observedAt),
+    ) +
+    "</span>" +
+    (a.priority !== "urgent" && c.feelingObservedAt
+      ? "<span>Condition reported " + esc(time(c.feelingObservedAt)) + "</span>"
+      : "") +
+    "</div>" +
     (demo()
       ? '<p class="example-note">Fictional mission context · ' +
         (Object.values(c.inputOrigins || {}).includes("user-entry")
@@ -1178,6 +1286,23 @@ function resultView() {
         esc(a.actions[0]?.how?.[0] || a.summary) +
         "</p></section>"
       : "") +
+    (reportedWorsening(c)
+      ? '<section class="notice warning" role="status"><strong>Worsening was reported.</strong><p>' +
+        (worseningContactRecorded(c)
+          ? "You recorded medical contact about this report. That does not establish clinical clearance."
+          : "Report the worsening to crew medical support. You do not need to finish this check before getting help. Use Urgent symptoms if something feels urgently wrong.") +
+        "</p>" +
+        (r && !worseningContactRecorded(c)
+          ? btn(
+              "Record medical contact",
+              "medical-contact",
+              "secondary",
+              'data-id="' + esc(r.id) + '"',
+            )
+          : "") +
+        "</section>"
+      : "") +
+    returnCard(c, a) +
     (a.priority === "urgent" ? "" : combinedContext(c, a, context)) +
     '<div class="result-layout"><div>' +
     (a.priority === "urgent" ? "" : bars(a.metrics) + recentPattern(context)) +
@@ -1246,10 +1371,18 @@ function resultView() {
             )
           : "") +
         btn(
-          "Record follow-up",
-          "follow",
+          r.returnRecordId
+            ? "Open return assessment"
+            : a.priority === "urgent"
+              ? "Record response"
+              : "Check how I am now",
+          r.returnRecordId
+            ? "record"
+            : a.priority === "urgent"
+              ? "follow"
+              : "return-check",
           "secondary",
-          'data-id="' + esc(r.id) + '"',
+          'data-id="' + esc(r.returnRecordId || r.id) + '"',
         ) +
         (c.followUpAt && new Date(c.followUpAt) > new Date()
           ? btn("Download calendar reminder", "calendar", "text") +
@@ -1269,19 +1402,28 @@ function resultView() {
                   same: "No reported change",
                   worse: "Reported worsening",
                   not_tried: "Step not attempted",
+                  unknown: "Change not known",
                 }[f.status],
               ) +
               "</strong> · " +
               esc(time(f.at)) +
+              (f.change && f.change !== f.status
+                ? " · " +
+                  esc(
+                    {
+                      better: "Reported improvement",
+                      same: "No reported change",
+                      worse: "Reported worsening",
+                      unknown: "Change not known",
+                    }[f.change] || f.change,
+                  )
+                : "") +
               "<br>" +
               esc(f.note || "No additional note.") +
               "</p>",
           )
           .join("") +
         '<p class="small quiet">A later change does not establish that the action caused it.</p>' +
-        (c.followUp?.status === "worse"
-          ? '<div class="notice warning"><strong>Report the worsening to crew medical support.</strong> Start a new check to record your current condition. If something feels urgently wrong, use Urgent symptoms.</div>'
-          : "") +
         "</section>"
       : "") +
     '<details class="scope-note"><summary>Sources, uncertainty and scope</summary><ul>' +
@@ -1294,6 +1436,7 @@ function resultView() {
       r ? "home" : "edit",
       "secondary",
     ) +
+    btn("Prepare review note", "review-note", "secondary") +
     btn("Download review", "export", "text") +
     (r ? btn("Start a new check", "start", "text") : "") +
     "</div>"
@@ -1317,14 +1460,17 @@ function historyView() {
           .map(
             (r) =>
               '<article class="history-card"><div><p class="eyebrow">' +
-              esc(time(r.check.observedAt)) +
+              esc(time(recordTime(r))) +
               "</p><h2>" +
               esc(r.assessment.headline) +
               "</h2><p>" +
-              hrs(r.check.sleepHours) +
-              " reported sleep · " +
-              hrs(r.check.opportunityHours) +
-              ' available</p><span class="small quiet">' +
+              (r.assessment.priority === "urgent"
+                ? "Urgent concern recorded. Sleep measurements are not used for this response."
+                : hrs(r.check.sleepHours) +
+                  " reported sleep · " +
+                  hrs(r.check.opportunityHours) +
+                  " available") +
+              '</p><span class="small quiet">' +
               (r.check.followUp
                 ? "Follow-up recorded"
                 : r.check.actionStatus === "done"
@@ -1549,6 +1695,7 @@ function urgent() {
 function follow(id) {
   let r = ws().checks.find((r) => r.id === id);
   if (!r) return;
+  if (r.assessment.priority !== "urgent") return returnDialog(id);
   modal(
     "What happened after your step?",
     '<p class="quiet">Report what you noticed. A later change does not prove that the step caused it.</p><form id="follow-form" data-id="' +
@@ -1565,6 +1712,81 @@ function follow(id) {
       '</select><label class="field-label" for="follow-note">What did you notice? <span class="quiet">Optional</span></label><textarea name="note" id="follow-note" rows="3" maxlength="2000"></textarea><p class="small quiet">New or worsening symptoms may need medical review. Use Urgent symptoms if something feels urgently wrong.</p><div class="form-actions">' +
       btn("Cancel", "close", "text") +
       '<button class="button primary" type="submit">Save follow-up</button></div></form>',
+  );
+}
+function returnDialog(id) {
+  const r = ws().checks.find((r) => r.id === id);
+  if (!r) return;
+  if (r.returnRecordId)
+    return actions.record({ dataset: { id: r.returnRecordId } });
+  if (r.assessment.priority === "urgent") return follow(id);
+  if (ws().draft?.returnContext?.previousRecordId === id)
+    return actions.continue();
+  const chosen = r.assessment.actions.find(
+    (a) => a.id === r.check.selectedActionId,
+  );
+  const resource = r.check.selectedActionId?.includes("light")
+    ? "eyeMask"
+    : r.check.selectedActionId?.includes("noise")
+      ? "earplugs"
+      : null;
+  const resourceField = resource
+    ? '<label class="field-label" for="return-resource">' +
+      (resource === "eyeMask"
+        ? "Eye mask or light blocker"
+        : "Hearing protection") +
+      ' available and permitted now?</label><select name="resource" id="return-resource">' +
+      [
+        ["unknown", "Not confirmed"],
+        ["allowed", "Available and permitted"],
+        ["unavailable", "Unavailable or not permitted"],
+      ]
+        .map(
+          ([v, t]) =>
+            '<option value="' +
+            v +
+            '"' +
+            sel(ws().profile[resource], v) +
+            ">" +
+            t +
+            "</option>",
+        )
+        .join("") +
+      "</select>"
+    : "";
+  modal(
+    "Pick up where you left off",
+    "<p>Your previous step: <strong>" +
+      esc(chosen?.title || r.assessment.headline) +
+      '</strong></p><form id="return-form" data-id="' +
+      esc(id) +
+      '"><label class="field-label" for="return-response">Were you able to take the step?</label><select id="return-response" name="response" required><option value="">Choose what happened</option><option value="tried">I tried it</option><option value="blocked">I could not do it</option><option value="not_tried">I have not tried it yet</option></select><label class="field-label" for="return-change">What have you noticed since then?</label><select id="return-change" name="change" required><option value="unknown">I am not sure yet</option><option value="better">An improvement</option><option value="same">No change</option><option value="worse">Worsening</option></select><label class="field-label" for="return-note">What happened or got in the way?</label><textarea id="return-note" name="note" maxlength="2000" rows="3" placeholder="For example: the eye mask was unavailable"></textarea><p class="small quiet">An obstacle is required if you could not take the step. Next, record fresh sleep and current functioning. Old answers will stay in the previous check.</p>' +
+      resourceField +
+      (ws().draft
+        ? '<p class="notice">You have an unfinished check. Beginning this return check will replace that draft. Saved checks remain available.</p>'
+        : "") +
+      '<p id="return-error" class="error" role="alert" hidden></p><div class="form-actions">' +
+      btn("Cancel", "close", "text") +
+      '<button type="submit" class="button primary">' +
+      (ws().draft ? "Replace draft & begin return" : "Begin return check") +
+      "</button></div></form>",
+  );
+}
+function noteDialog() {
+  const q = review();
+  if (!q) return;
+  const note = reviewNote(
+    { check: q.c, profile: q.p, assessment: q.a },
+    ws().checks,
+  );
+  modal(
+    "A note for crew medical support",
+    '<p>Review the details before sharing. This note stays on your device until you choose to share it. It does not contact medical support.</p><label class="field-label" for="review-note">Your review note</label><textarea id="review-note" class="review-note" rows="16" readonly>' +
+      esc(note) +
+      '</textarea><div class="button-row">' +
+      btn("Copy note", "copy-note") +
+      btn("Download text note", "download-note", "secondary") +
+      '</div><p id="note-feedback" class="small" role="status"></p>',
   );
 }
 function changed(c, field, value) {
@@ -1594,11 +1816,17 @@ function capture(form, target) {
     let t = v.get("observedAt");
     entries.observedAt =
       t && Number.isFinite(new Date(t).getTime())
-        ? new Date(t).toISOString()
+        ? t === inp(c.observedAt)
+          ? c.observedAt
+          : new Date(t).toISOString()
         : "";
   }
   if (form.id === "feeling-form")
-    entries = { feeling: v.get("feeling") || "unknown" };
+    entries = {
+      feeling: v.get("feeling") || "unknown",
+      feelingScope: "current",
+      feelingObservedAt: new Date().toISOString(),
+    };
   if (form.id === "disruption-form") {
     let d = v.getAll("disruptions");
     entries = {
@@ -1788,11 +2016,53 @@ const actions = {
     }
   },
   follow: (el) => follow(el.dataset.id),
+  "return-check": (el) => returnDialog(el.dataset.id),
+  "draft-concern": () => {
+    state.reviewId = null;
+    go("result");
+  },
+  "medical-contact": (el) =>
+    modal(
+      "Record medical contact",
+      '<p>Record contact you have already made about this worsening report. This does not send a message or establish clinical clearance.</p><form id="contact-form" data-id="' +
+        esc(el.dataset.id) +
+        '"><label><input type="checkbox" name="contacted" required> I contacted crew medical support about this report</label><label class="field-label" for="contact-note">What should stay in your record? Optional</label><textarea id="contact-note" name="note" maxlength="2000" rows="3"></textarea><div class="form-actions">' +
+        btn("Cancel", "close", "text") +
+        '<button class="button primary" type="submit">Record contact made</button></div></form>',
+    ),
+  "review-note": noteDialog,
+  "copy-note": async () => {
+    const feedback = document.querySelector("#note-feedback");
+    try {
+      await navigator.clipboard.writeText(
+        document.querySelector("#review-note").value,
+      );
+      feedback.textContent = "Note copied. Review it before sharing.";
+    } catch {
+      feedback.textContent =
+        "Copy is unavailable here. Select the note to copy it, or download the text file.";
+    }
+  },
+  "download-note": () => {
+    const url = URL.createObjectURL(
+      new Blob([document.querySelector("#review-note").value], {
+        type: "text/plain;charset=utf-8",
+      }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "satris-crew-review.txt";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    document.querySelector("#note-feedback").textContent =
+      "Note downloaded. Nothing has been sent.";
+  },
   export: download,
 };
 function recordUrgent(value) {
   if (!ws().draft) ws().draft = createCheck(state.mode);
   changed(ws().draft, "urgent", value);
+  changed(ws().draft, "urgentReportedAt", new Date().toISOString());
   ws().draft.selectedActionId =
     assess(ws().draft, ws().profile).actions.find((a) => a.available)?.id ||
     null;
@@ -1832,6 +2102,8 @@ document.addEventListener("submit", (ev) => {
       "save-form",
       "follow-form",
       "rhythm-form",
+      "return-form",
+      "contact-form",
     ].includes(f.id)
   )
     return;
@@ -1936,7 +2208,9 @@ document.addEventListener("submit", (ev) => {
       let q = review();
       if (!q || q.r) return;
       const contextErrors =
-        q.a.priority === "urgent" ? [] : validateContext(q.c);
+        q.a.priority === "urgent"
+          ? []
+          : [...validateCheck(q.c), ...validateContext(q.c)];
       if (contextErrors.length) throw Error(contextErrors.join(" "));
       if (
         !q.a.actions.some((x) => x.id === q.c.selectedActionId && x.available)
@@ -1950,7 +2224,7 @@ document.addEventListener("submit", (ev) => {
         throw Error("Choose a future reminder or leave it blank.");
       q.c.followUpAt = t ? new Date(t).toISOString() : null;
       q.c.actionStatus = "planned";
-      ws().checks.push({
+      const newRecord = {
         id: q.c.id,
         check: clone(q.c),
         profile: clone(q.p),
@@ -1958,7 +2232,9 @@ document.addEventListener("submit", (ev) => {
         context: clone(contextSummary(q.c, ws().checks)),
         savedAt: new Date().toISOString(),
         followUps: [],
-      });
+      };
+      linkReturn(newRecord, ws().checks);
+      ws().checks.push(newRecord);
       ws().schedule = advanceRoutine(ws().schedule, q.c, Date.now());
       state.reviewId = q.c.id;
       ws().draft = null;
@@ -1969,6 +2245,35 @@ document.addEventListener("submit", (ev) => {
           ? "Check saved. Your next step is here when you need it."
           : "Record is in memory only. Export before closing.",
       );
+    }
+    if (f.id === "return-form") {
+      const prior = ws().checks.find((r) => r.id === f.dataset.id);
+      if (!prior) throw Error("The previous check could not be found.");
+      ws().draft = beginReturn(
+        prior,
+        v.get("response"),
+        v.get("change"),
+        v.get("note"),
+      );
+      const resource = prior.check.selectedActionId?.includes("light")
+        ? "eyeMask"
+        : prior.check.selectedActionId?.includes("noise")
+          ? "earplugs"
+          : null;
+      if (
+        resource &&
+        ["allowed", "unavailable", "unknown"].includes(v.get("resource"))
+      ) {
+        ws().profile[resource] = v.get("resource");
+        ws().draft.returnContext.resource = {
+          name: resource,
+          status: v.get("resource"),
+        };
+      }
+      state.step = 0;
+      state.reviewId = null;
+      dialog.close();
+      go("check");
     }
     if (f.id === "follow-form") {
       let r = ws().checks.find((r) => r.id === f.dataset.id);
@@ -1988,8 +2293,34 @@ document.addEventListener("submit", (ev) => {
       render();
       notify("Follow-up recorded.");
     }
+    if (f.id === "contact-form") {
+      const record = ws().checks.find((r) => r.id === f.dataset.id);
+      if (!record || !v.has("contacted"))
+        throw Error("Confirm contact already made about this report.");
+      const contact = {
+        at: new Date().toISOString(),
+        note: v.get("note") || "",
+      };
+      record.check.medicalContactAt = contact.at;
+      record.check.medicalContacts ??= [];
+      record.check.medicalContacts.push(contact);
+      state.reviewId = record.id;
+      state.view = "result";
+      persist();
+      dialog.close();
+      render();
+      notify(
+        "Medical contact recorded. This does not establish clinical clearance.",
+      );
+    }
   } catch (e) {
     error = e.message;
+    if (f.id === "return-form") {
+      const el = document.querySelector("#return-error");
+      el.hidden = false;
+      el.textContent = error;
+      return;
+    }
     if (f.id === "profile-form" || f.id === "rhythm-form") {
       let el = document.querySelector(
         f.id === "rhythm-form" ? "#rhythm-error" : "#profile-error",
