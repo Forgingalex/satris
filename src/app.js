@@ -803,7 +803,7 @@ function contextFields(c) {
   return (
     '<details class="help-details optional-context" ' +
     (error ? "open" : "") +
-    '><summary>Add context for a review <span class="quiet">(optional)</span></summary><p class="small quiet">Add only what you know. This can make the review more specific; you can finish without it.</p><div class="two-fields">' +
+    '><summary>Add context for a review <span class="quiet">(optional)</span></summary><p class="small quiet">Add what you know. You can skip this section.</p><div class="two-fields">' +
     [
       ["stress", "Reported stress"],
       ["workload", "Reported workload"],
@@ -903,7 +903,7 @@ function combinedContext(c, a, context) {
     '<section class="combined-review"><p class="eyebrow">Your observations together</p><h2>' +
     (c.upcomingTask
       ? "Your review before " + esc(c.upcomingTask)
-      : "Your combined review") +
+      : "Your sleep review") +
     "</h2><p>" +
     esc(
       context.summary ||
@@ -1077,7 +1077,7 @@ function sleepForm(c) {
 }
 function feelingForm(c) {
   return (
-    '<form id="feeling-form"><p class="intro">Your current experience matters even when a number looks reassuring. Choose the description that fits best.</p>' +
+    '<form id="feeling-form"><p class="intro">Choose how you feel now. Your experience matters, even when the hours look reassuring.</p>' +
     (c.isCurrent === false
       ? '<p class="notice">Your sleep record is from an earlier period. This question is about how you feel now and is recorded with its own time.</p>'
       : "") +
@@ -1337,7 +1337,7 @@ function resultView() {
       ? "What to do now"
       : r && chosen
         ? esc(chosen.title)
-        : "A step you can actually take") +
+        : "Choose your next step") +
     "</h2>" +
     a.actions.map((act) => actionCard(act, c, r)).join("") +
     (!r
@@ -1497,7 +1497,7 @@ function aboutView() {
     title(
       "About Satris",
       "Small checks. Clearer next steps.",
-      "A guided routine sleep review, built for mission context.",
+      "Routine sleep checks for mission crews and analog mission teams.",
     ) +
     '<section class="about-card"><h2>What this version does</h2><p>Satris connects reported sleep, available opportunity, current sleepiness and reported disruptions to a bounded explanation and feasible next step. It keeps the uncertainty and supporting sources visible.</p><p>This version has not been clinically validated or certified for flight. It does not provide a full health assessment, diagnosis, prescriptions or fitness clearance. Satris does not measure through a camera or connect to sensors.</p><h2>Your data</h2><p>Records stay in this browser. No account, analytics, model service or health-data upload is used. This app does not encrypt browser records; storage can be cleared or evicted. Export anything you need to keep. Earlier-version records remain in separate storage.</p><h2>Scenario and personal observations</h2><p>Examples contain fictional mission context and example observations. You can edit them with your own observations; their origins remain distinct in exports and they stay in scenario records. Personal checks start empty.</p><div class="button-row">' +
     btn("Quick tour", "tour", "secondary") +
@@ -1760,7 +1760,7 @@ function returnDialog(id) {
       esc(chosen?.title || r.assessment.headline) +
       '</strong></p><form id="return-form" data-id="' +
       esc(id) +
-      '"><label class="field-label" for="return-response">Were you able to take the step?</label><select id="return-response" name="response" required><option value="">Choose what happened</option><option value="tried">I tried it</option><option value="blocked">I could not do it</option><option value="not_tried">I have not tried it yet</option></select><label class="field-label" for="return-change">What have you noticed since then?</label><select id="return-change" name="change" required><option value="unknown">I am not sure yet</option><option value="better">An improvement</option><option value="same">No change</option><option value="worse">Worsening</option></select><label class="field-label" for="return-note">What happened or got in the way?</label><textarea id="return-note" name="note" maxlength="2000" rows="3" placeholder="For example: the eye mask was unavailable"></textarea><p class="small quiet">An obstacle is required if you could not take the step. Next, record fresh sleep and current functioning. Old answers will stay in the previous check.</p>' +
+      '"><label class="field-label" for="return-response">Were you able to take the step?</label><select id="return-response" name="response" required><option value="">Choose what happened</option><option value="tried">I tried it</option><option value="blocked">I could not do it</option><option value="not_tried">I have not tried it yet</option></select><label class="field-label" for="return-change">What have you noticed since then?</label><select id="return-change" name="change" required><option value="unknown">I am not sure yet</option><option value="better">An improvement</option><option value="same">No change</option><option value="worse">Worsening</option></select><label class="field-label" for="return-note">What happened or got in the way?</label><textarea id="return-note" name="note" maxlength="2000" rows="3" placeholder="For example: the eye mask was unavailable"></textarea><p class="small quiet">If you could not take the step, tell us why. Next, record your latest sleep and how you feel now. Your previous answers stay in the earlier check.</p>' +
       resourceField +
       (ws().draft
         ? '<p class="notice">You have an unfinished check. Beginning this return check will replace that draft. Saved checks remain available.</p>'
