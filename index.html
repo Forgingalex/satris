@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080F1C" />
+    <meta
+      name="description"
+      content="A guided routine sleep check. Understand your observations, choose a supported next step and follow through."
+    />
+    <title>Satris · Your next health step</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/satris-emblem.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./src/app.js"></script>
+  </head>
+  <body>
+    <a href="#main" class="skip-link">Skip to workspace</a>
+    <div id="app">
+      <div class="loading">
+        <img src="./assets/satris-wordmark.svg" alt="Satris" />
+        <p>Opening your workspace…</p>
+      </div>
+    </div>
+    <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <noscript
+      >Satris needs JavaScript for your sleep check. Enable JavaScript and
+      reload.</noscript
+    >
+  </body>
+</html>
