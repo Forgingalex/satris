@@ -1,4 +1,5 @@
 // Descriptive context only. This module does not classify health or task readiness.
+import { feelingIsCurrent } from "./sleep.js";
 const knownNumber = (v) => typeof v === "number" && Number.isFinite(v);
 const norm = (v) =>
   String(v || "")
@@ -14,7 +15,7 @@ const feeling = {
   unintended: "often falling asleep unintentionally",
   unknown: "current sleepiness not known",
 };
-export function validateContext(c) {
+export function validateContext(c, nowMs = Date.now()) {
   const errors = [];
   for (const key of ["stress", "workload"])
     if (
@@ -60,14 +61,24 @@ export function validateContext(c) {
       errors.push(
         "Record a valid reaction-test time, or leave its time unknown.",
       );
+    else if (c.reactionObservedAt && time(c.reactionObservedAt) > nowMs)
+      errors.push(
+        "Reaction-test time cannot be in the future. Record a result already measured, or leave its time unknown.",
+      );
   }
   return errors;
 }
-function cohort(c, records) {
+function cohort(c, records, nowMs) {
   const currentTime = time(c.observedAt);
+  if (!Number.isFinite(currentTime) || currentTime > nowMs) return [];
   const candidates = records
     .map((r) => ({ c: r.check || r, savedAt: r.savedAt || r.enteredAt || "" }))
-    .filter(({ c: p }) => {
+    .filter(({ c: p, savedAt }) => {
+      if (
+        time(p.observedAt) > nowMs ||
+        (Number.isFinite(time(savedAt)) && time(p.observedAt) > time(savedAt))
+      )
+        return false;
       if (
         p.id === c.id ||
         norm(p.mode || "personal") !== norm(c.mode || "personal")
@@ -107,7 +118,7 @@ function cohort(c, records) {
     .map((x) => x.c)
     .sort((a, b) => time(a.observedAt) - time(b.observedAt));
 }
-function metricComparison(c, prior, key) {
+function metricComparison(c, prior, key, nowMs) {
   const earlier = prior
     .filter(
       (p) =>
@@ -122,7 +133,12 @@ function metricComparison(c, prior, key) {
     ? rounded(values.reduce((a, b) => a + b, 0) / values.length)
     : null;
   const current =
-    c.quality !== "uncertain" && knownNumber(c[key]) ? c[key] : null;
+    c.quality !== "uncertain" &&
+    knownNumber(c[key]) &&
+    Number.isFinite(time(c.observedAt)) &&
+    time(c.observedAt) <= nowMs
+      ? c[key]
+      : null;
   return {
     count: earlier.length,
     mean,
@@ -146,7 +162,7 @@ function reactionKey(c) {
     .map((k) => norm(c[k]))
     .join("|");
 }
-function validReaction(c) {
+function validReaction(c, nowMs) {
   return (
     knownNumber(c.reactionMs) &&
     c.reactionMs > 0 &&
@@ -155,13 +171,14 @@ function validReaction(c) {
       norm(c[k]),
     ) &&
     Number.isFinite(time(c.reactionObservedAt)) &&
+    time(c.reactionObservedAt) <= nowMs &&
     c.reactionQuality !== "uncertain"
   );
 }
-export function contextSummary(c, records = []) {
-  const prior = cohort(c, records),
-    sleep = metricComparison(c, prior, "sleepHours"),
-    opportunity = metricComparison(c, prior, "opportunityHours");
+export function contextSummary(c, records = [], nowMs = Date.now()) {
+  const prior = cohort(c, records, nowMs),
+    sleep = metricComparison(c, prior, "sleepHours", nowMs),
+    opportunity = metricComparison(c, prior, "opportunityHours", nowMs);
   const signed =
     sleep.difference === null
       ? null
@@ -190,10 +207,9 @@ export function contextSummary(c, records = []) {
       meaning: "Time available, not time confirmed asleep.",
     },
     {
-      label:
-        c.isCurrent === false ? "Recorded experience" : "Current experience",
+      label: feelingIsCurrent(c) ? "Current experience" : "Recorded experience",
       value: feeling[c.feeling] || feeling.unknown,
-      meaning: "A plain-language report, not a validated numerical scale.",
+      meaning: `A plain-language report, not a validated numerical scale. Condition report time: ${c.feelingObservedAt || (c.feelingScope === "current" ? "not recorded" : c.observedAt) || "not recorded"}.`,
     },
   ];
   if (c.bedTime || c.wakeTime)
@@ -230,11 +246,11 @@ export function contextSummary(c, records = []) {
       value: `${c.reactionMs} ms${c.reactionMetric ? " · " + c.reactionMetric : ""}`,
       meaning: `${c.reactionMethod || "Method unknown"}; ${c.reactionProtocol || "protocol unknown"}; ${c.reactionDevice || "device unknown"}. Test time: ${c.reactionObservedAt || "not recorded"}. Not measured by Satris.`,
     });
-    const tests = validReaction(c)
+    const tests = validReaction(c, nowMs)
       ? prior
           .filter(
             (p) =>
-              validReaction(p) &&
+              validReaction(p, nowMs) &&
               reactionKey(p) === reactionKey(c) &&
               time(p.reactionObservedAt) < time(c.reactionObservedAt),
           )
@@ -258,7 +274,7 @@ export function contextSummary(c, records = []) {
         : "No compatible dated earlier result is available for comparison. Different metrics, protocols or devices are not pooled.",
     };
   }
-  const summary = `${knownNumber(c.sleepHours) ? c.sleepHours + " h estimated sleep" : "Sleep amount not recorded"}; ${knownNumber(c.opportunityHours) ? c.opportunityHours + " h available" : "opportunity not recorded"}. You report ${feeling[c.feeling] || feeling.unknown}.${c.workload && c.workload !== "unknown" ? " Reported workload: " + c.workload + "." : ""}${c.stress && c.stress !== "unknown" ? " Reported stress: " + c.stress + "." : ""} These observations describe the same check; their combination does not establish a cause or clear you for a task.`;
+  const summary = `${knownNumber(c.sleepHours) ? c.sleepHours + " h estimated sleep" : "Sleep amount not recorded"}; ${knownNumber(c.opportunityHours) ? c.opportunityHours + " h available" : "opportunity not recorded"}.${c.isCurrent === false ? " This sleep record is from an earlier period." : ""} ${feelingIsCurrent(c) ? "Current condition report" : "Earlier condition report"}: ${feeling[c.feeling] || feeling.unknown}.${c.workload && c.workload !== "unknown" ? " Reported workload: " + c.workload + "." : ""}${c.stress && c.stress !== "unknown" ? " Reported stress: " + c.stress + "." : ""} Sleep and condition reports retain their own times; their combination does not establish a cause or clear you for a task.`;
   return {
     heading: c.upcomingTask
       ? `Context to review before ${c.upcomingTask}`

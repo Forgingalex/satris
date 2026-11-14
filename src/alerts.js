@@ -1,4 +1,30 @@
 // Task reminders derived from recorded information, never physiological monitoring.
+export const reportedWorsening = (check) =>
+  check?.followUp?.status === "worse" ||
+  check?.followUp?.change === "worse" ||
+  check?.returnContext?.change === "worse";
+export function worseningContactRecorded(check, nowMs = Date.now()) {
+  if (!reportedWorsening(check)) return false;
+  const reportedAt =
+    check?.followUp?.change === "worse" || check?.followUp?.status === "worse"
+      ? check.followUp.at
+      : check?.returnContext?.at;
+  const contactAt = Date.parse(check?.medicalContactAt);
+  return (
+    Number.isFinite(contactAt) &&
+    contactAt <= nowMs &&
+    Number.isFinite(Date.parse(reportedAt)) &&
+    contactAt >= Date.parse(reportedAt)
+  );
+}
+export function primaryPlan(records = [], nowMs = Date.now()) {
+  const concern = deriveAlerts(records, null, nowMs).find(
+    (a) => a.kind === "urgent" || a.kind === "review",
+  );
+  return (
+    records.find((r) => r.id === concern?.recordId) || records.at(-1) || null
+  );
+}
 export function deriveAlerts(
   records = [],
   draft = null,
@@ -15,7 +41,18 @@ export function deriveAlerts(
       message:
         "Open the recorded concern. Do not wait for routine measurements.",
       action: "record",
-      at: draft.observedAt,
+      at: draft.urgentReportedAt || draft.observedAt,
+    });
+  else if (draft && reportedWorsening(draft))
+    alerts.push({
+      id: `draft-${draft.id}`,
+      recordId: null,
+      kind: "review",
+      title: "You reported worsening",
+      message:
+        "Report the worsening to crew medical support. You do not need to finish this check before getting help.",
+      action: "record",
+      at: draft.returnContext?.at,
     });
   for (const record of records) {
     const c = record.check || {},
@@ -25,15 +62,27 @@ export function deriveAlerts(
       c.actionStatus === "done" &&
       c.followUp?.status !== "not_tried";
     const medicalContactRecorded =
-      c.selectedActionId === "medical-review" &&
-      c.actionStatus === "done" &&
-      c.followUp?.status !== "not_tried";
+      (c.selectedActionId === "medical-review" &&
+        c.actionStatus === "done" &&
+        c.followUp?.status !== "not_tried") ||
+      worseningContactRecorded(c, nowMs);
+    const worseningMovedToReturn = records.some(
+      (r) =>
+        r.id === record.returnRecordId &&
+        r.check?.returnContext?.change === "worse" &&
+        r.check.returnContext.at === c.followUp?.at,
+    );
+    const unresolvedWorsening =
+      reportedWorsening(c) &&
+      !worseningContactRecorded(c, nowMs) &&
+      !worseningMovedToReturn;
     const base = {
       recordId: record.id,
-      at:
-        c.followUp?.status === "worse"
-          ? c.followUp.at || c.observedAt
-          : c.observedAt,
+      at: reportedWorsening(c)
+        ? c.followUp?.at || c.returnContext?.at || c.observedAt
+        : a.priority === "urgent"
+          ? c.urgentReportedAt || c.observedAt
+          : c.feelingObservedAt || c.observedAt,
     };
     if (a.priority === "urgent" && !responseRecorded)
       alerts.push({
@@ -47,16 +96,15 @@ export function deriveAlerts(
       });
     else if (
       (a.priority === "review" && !medicalContactRecorded) ||
-      c.followUp?.status === "worse"
+      unresolvedWorsening
     )
       alerts.push({
         ...base,
         id: `review-${record.id}`,
         kind: "review",
-        title:
-          c.followUp?.status === "worse"
-            ? "Worsening was reported at follow-up"
-            : "A medical review is still recorded as needed",
+        title: unresolvedWorsening
+          ? "Worsening was reported at follow-up"
+          : "A medical review is still recorded as needed",
         message:
           "Open the record and follow its review instructions. Completing a different action does not complete a medical review.",
         action: "record",
