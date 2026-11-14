@@ -1,0 +1,15 @@
+{
+  "name": "satris",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Satris guided sleep checks, clear next steps and follow-up",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
